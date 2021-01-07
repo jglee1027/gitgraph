@@ -20,23 +20,23 @@
 (defparameter *default-color* +gray+)
 (defparameter *default-new-color* +yellow+)
 (defparameter *branch-x* 100)
-(defparameter *branch-y* 100)
+(defparameter *branch-y* 50)
 (defparameter *branch-name-height* 30)
 (defparameter *branch-margin* 100)
 (defparameter *branch-name-pad-width* 30)
 (defparameter *commit-merge-offset-y* 35)
-(defparameter *commit-margin* 70)
+(defparameter *commit-margin* 50)
 (defparameter *commit-new-id* 0)
 (defparameter *commit-radius* 15)
 (defparameter *repo*
-  '((:branch-name feature/a :root-commit d2 :color +magenta+
-     :commits (a1 a2 a3 a4))
+  '((:branch-name feature/a :root-commit d3 :color +magenta+
+     :commits ((d3 a1) a2 a3 a4))
     (:branch-name feature/b :root-commit d3 :color +magenta+
-     :commits (b1 b2 b3 (d8 b4) b5 b6))
+     :commits (b1 b2 b3 (d7 b4) b5 b6))
     (:branch-name develop :root-commit m1 :color +light-yellow+
-     :commits (d1 d2 d3 d4 (h1 d5) d6 (b3 d7) (r2 d8) d9 (r4 d10) (a4 d11) (r5 d12)))
-    (:branch-name release/r :root-commit d6 :color +light-green+
-     :commits (r1 r2 r3 r4 (d11 r5)))
+     :commits (d1 d2 d3 d4 (h1 d5) (b3 d6) (r2 d7) (r4 d8) (b6 d9) (a4 d10) (r5 d11)))
+    (:branch-name release/r :color +light-green+
+     :commits ((d6 r1) r2 r3 r4 (d10 r5)))
     (:branch-name hotfix/h :root-commit m1 :color +indian-red+
      :commits (h1))
     (:branch-name master :color +light-blue+
@@ -55,6 +55,11 @@
   (if (null (color branch))
       (setf (color branch) *default-color*)))
 
+(defmethod print-object ((obj branch) stream)
+  (print-unreadable-object (obj stream :type t)
+    (with-slots (name x y commits) obj
+      (format stream "~a ~a ~a ~a" name x y commits))))
+
 (defclass commit ()
   ((commit :accessor commit :initarg :commit)
    (merge-commit :accessor merge-commit :initarg :merge-commit :initform nil)
@@ -66,6 +71,10 @@
 (defmethod initialize-instance :after ((commit commit) &key)
   (if (null (color commit))
       (setf (color commit) *default-color*)))
+
+(defmethod print-object ((obj commit) stream)
+  (with-slots (commit y) obj
+    (format stream "(~a ~a)" commit y)))
 
 (defgeneric draw (sheet obj))
 (defgeneric copy (obj))
@@ -244,8 +253,10 @@
                                                (sheet-transformation pane)
                                                (scale frame)
                                                (scale frame)))
-    (dolist (branch (branches frame))
-      (draw pane branch))))
+    (with-slots (branches) frame
+      (layout-branches-vertically-beside (update-merge-commits branches) branches)
+      (dolist (branch branches)
+        (draw pane branch)))))
 
 (defmethod note-tab-page-changed :after ((layout tab-layout-pane) page)
   (format t "~a~%" page))
@@ -291,7 +302,7 @@
   (dolist (branch branches)
     (dolist (c (commits branch))
       (if (string-equal commit (commit c))
-          (return-from find-commit (cons branch c))))))
+          (return-from find-commit (cons c branch))))))
 
 (defun make-colored-button (color &key width height)
   (make-pane 'push-button
@@ -351,6 +362,48 @@
       (setf branches (nconc branches (list (make-branch branch)))))
     branches))
 
+(defun layout-merge-commit-vertically-beside (merge-commit merge-commits branches)
+  (labels ((update-y-of-commits-in-branch (merge-commit commit)
+             (let ((diff-y (- (y commit) (y merge-commit))))
+               (if (= diff-y *commit-margin*)
+                   (return-from update-y-of-commits-in-branch))
+               (let* ((base-commit (if (<= diff-y 0)
+                                       commit
+                                       merge-commit))
+                      (branch (cdr (find-commit base-commit branches))))
+                 (setf diff-y (+ (abs diff-y) (if (eq base-commit commit)
+                                                  *commit-margin*
+                                                  (- *commit-margin*))))
+                 (with-slots (commits) branch
+                   (loop for c in commits
+                         for mc = (merge-commit c)
+                         for c2 = (gethash c merge-commits)
+                         with new-y = 0
+                         when (> new-y 0) do
+                           (setf (y c) (incf new-y *commit-margin*))
+                           (if mc
+                               (layout-merge-commit-vertically-beside mc merge-commits branches))
+                         when (eq c base-commit) do
+                           (setf new-y (incf (y c) diff-y))
+                           (if (eq c (car commits))
+                               (setf (y branch) (- new-y *commit-margin*)))
+                         ))))))
+    (let ((commits (gethash merge-commit merge-commits)))
+      (loop for commit-cons in commits
+            for commit = (car commit-cons)
+            for commits2 = (gethash commit merge-commits)
+            do (update-y-of-commits-in-branch merge-commit commit)
+            when commits2 do
+              (layout-merge-commit-vertically-beside commit merge-commits branches)))))
+
+(defun layout-branches-vertically-beside (merge-commits branches)
+  (dolist (branch branches)
+    (with-slots (commits) branch
+      (loop for commit in commits
+            when (gethash commit merge-commits) do
+              (layout-merge-commit-vertically-beside commit merge-commits branches))))
+  branches)
+
 (defun layout-branch (branch &optional  x y)
   (if x
       (setf (x branch) x)
@@ -367,8 +420,8 @@
 
 (defun layout-branches-vertically (branch branches)
   (let* ((root (find-commit (root-commit branch) branches))
-         (root-branch (car root))
-         (root-commit (cdr root)))
+         (root-branch (cdr root))
+         (root-commit (car root)))
     (if root-branch
         (layout-branches-vertically root-branch branches))
     (when root-commit
@@ -377,11 +430,17 @@
                      (x branch)
                      (y root-commit)))))
 
-(defun set-merge-commits (branch branches)
-  (loop for commit in (commits branch)
-        for merge-commit = (merge-commit commit)
-        when merge-commit do
-          (setf (merge-commit commit) (cdr (find-commit merge-commit branches)))))
+(defun update-merge-commits (branches)
+  (let ((merge-commits (make-hash-table)))
+    (dolist (branch branches)
+      (loop for commit in (commits branch)
+            for merge-commit = (merge-commit commit)
+            when merge-commit do
+              (setf (merge-commit commit) (car (find-commit merge-commit branches)))
+              (setf (gethash (merge-commit commit) merge-commits)
+                    (append (gethash (merge-commit commit) merge-commits)
+                            (list (cons commit branch))))))
+    merge-commits))
 
 (defun layout-branches (branches)
   ;; horizontally
@@ -393,8 +452,9 @@
 
   ;; vertically
   (loop for branch in branches do
-    (set-merge-commits branch branches)
     (layout-branches-vertically branch branches))
+
+  (layout-branches-vertically-beside (update-merge-commits branches) branches)
   branches)
 
 (defun build (repo)
@@ -408,7 +468,7 @@
 (defun insert-new-commit(commit &key (before t))
   (with-slots (branches undo-list) *application-frame*
     (push (copy-branches branches) undo-list)
-    (let ((branch (car (find-commit commit branches))))
+    (let ((branch (cdr (find-commit commit branches))))
       (with-slots (commits) branch
         (let ((pos (position commit commits))
               (new-commit (make-instance 'commit :commit (format nil "'~a" (incf *commit-new-id*))
@@ -422,7 +482,7 @@
 (defun delete-commit(commit)
   (with-slots (branches undo-list) *application-frame*
     (push (copy-branches branches) undo-list)
-    (let ((branch (car (find-commit commit branches))))
+    (let ((branch (cdr (find-commit commit branches))))
       (with-slots (commits) branch
         (setf commits
               (remove commit commits)))
@@ -433,7 +493,7 @@
     (push (copy-branches branches) undo-list)
     (let* ((commits `(,(format nil "'~a" (incf *commit-new-id*))
                       ,(format nil "'~a" (incf *commit-new-id*))))
-           (root-branch (car (find-commit root-commit branches)))
+           (root-branch (cdr (find-commit root-commit branches)))
            (pos (position root-branch branches))
            (branch (make-instance 'branch :name name
                                           :color *default-new-color*
@@ -499,6 +559,11 @@
   (setf *commit-new-id* 0)
   (setf (undo-list *application-frame*) nil)
   (setf (redo-list *application-frame*) nil))
+
+(define-gitgraph-command (com-pretty :name "Pretty" :menu t) ()
+  (with-slots (branches undo-list) *application-frame*
+    (push (copy-branches branches) undo-list)
+    (layout-branches-vertically-beside (update-merge-commits branches) branches)))
 
 (define-gitgraph-command (com-undo :name "Undo" :menu t :keystroke (:left :meta)) ()
   (with-slots (branches undo-list redo-list) *application-frame*

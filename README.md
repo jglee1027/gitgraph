@@ -27,16 +27,19 @@ The supported commands are as follows:
 - Open
 - Save
 - Reload
+- Pretty
 - Undo (Meta + Left)
 - Redo (Meta + Right)
 - Zoom in
+- Zoom out
 - Quit
-- commit before
 - commit after
+- commit before
 - commit delete
 - branch new left
 - branch new right
 - branch rm
+- merge
 
 # License
 
