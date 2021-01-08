@@ -21,6 +21,12 @@ CL-USER> (gitgraph:gitgraph)
 
 ## Build
 
+```bash
+$ ./build.sh
+;; loading system "gitgraph"
+$ ./gitgraph
+```
+
 # Commands
 The supported commands are as follows:
 
