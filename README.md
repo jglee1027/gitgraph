@@ -3,6 +3,8 @@
 `gitgraph` is a CLIM-based tool to display and editor graphical representation
 of the commit history in s-expression.
 
+![demo](doc/demo.gif)
+
 # QuickStart
 
 ## Download
